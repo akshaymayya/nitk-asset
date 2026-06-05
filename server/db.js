@@ -1,19 +1,20 @@
-import Database from "better-sqlite3";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import pg from "pg";
 import { randomBytes } from "crypto";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.DB_PATH || path.join(__dirname, "data", "assets.db");
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Add SSL for cloud DBs (Supabase requires it) unless running locally without one
+  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes("localhost") 
+    ? false 
+    : { rejectUnauthorized: false }
+});
 
-let db;
-
-export function initDb() {
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.exec(`
+export async function initDb() {
+  if (!process.env.DATABASE_URL) {
+    console.warn("WARNING: DATABASE_URL is not set. Database will not initialize.");
+    return;
+  }
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS assets (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -66,78 +67,86 @@ export function buildLabelCode(code1, code2) {
   return primary;
 }
 
-export function listAssets() {
-  const rows = db.prepare("SELECT * FROM assets ORDER BY created_at DESC").all();
-  return rows.map(rowToAsset);
+export async function listAssets() {
+  if (!process.env.DATABASE_URL) return [];
+  const result = await pool.query("SELECT * FROM assets ORDER BY created_at DESC");
+  return result.rows.map(rowToAsset);
 }
 
-export function getAsset(id) {
-  const row = db.prepare("SELECT * FROM assets WHERE id = ?").get(id);
-  return rowToAsset(row);
+export async function getAsset(id) {
+  if (!process.env.DATABASE_URL) return null;
+  const result = await pool.query("SELECT * FROM assets WHERE id = $1", [id]);
+  return rowToAsset(result.rows[0]);
 }
 
-export function getAssetByLabel(labelCode) {
-  const row = db.prepare("SELECT * FROM assets WHERE label_code = ?").get(labelCode);
-  return rowToAsset(row);
+export async function getAssetByLabel(labelCode) {
+  if (!process.env.DATABASE_URL) return null;
+  const result = await pool.query("SELECT * FROM assets WHERE label_code = $1", [labelCode]);
+  return rowToAsset(result.rows[0]);
 }
 
-export function createAsset(fields) {
+export async function createAsset(fields) {
+  if (!process.env.DATABASE_URL) throw new Error("Database not connected");
   const id = genId();
   const now = new Date().toISOString();
   const labelCode = buildLabelCode(fields.code1, fields.code2);
 
-  db.prepare(
+  await pool.query(
     `INSERT INTO assets (
       id, name, category, vendor, bill_date, warranty_expiry, location,
       code1, code2, label_code, remarks, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    fields.name,
-    fields.category,
-    fields.vendor,
-    fields.billDate,
-    fields.warrantyExpiry,
-    fields.location,
-    fields.code1,
-    fields.code2,
-    labelCode,
-    fields.remarks,
-    now,
-    now
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [
+      id,
+      fields.name,
+      fields.category,
+      fields.vendor,
+      fields.billDate,
+      fields.warrantyExpiry,
+      fields.location,
+      fields.code1,
+      fields.code2,
+      labelCode,
+      fields.remarks,
+      now,
+      now
+    ]
   );
 
-  return getAsset(id);
+  return await getAsset(id);
 }
 
-export function updateAsset(id, fields) {
+export async function updateAsset(id, fields) {
+  if (!process.env.DATABASE_URL) throw new Error("Database not connected");
   const now = new Date().toISOString();
   const labelCode = buildLabelCode(fields.code1, fields.code2);
 
-  db.prepare(
+  await pool.query(
     `UPDATE assets SET
-      name = ?, category = ?, vendor = ?, bill_date = ?, warranty_expiry = ?,
-      location = ?, code1 = ?, code2 = ?, label_code = ?, remarks = ?, updated_at = ?
-    WHERE id = ?`
-  ).run(
-    fields.name,
-    fields.category,
-    fields.vendor,
-    fields.billDate,
-    fields.warrantyExpiry,
-    fields.location,
-    fields.code1,
-    fields.code2,
-    labelCode,
-    fields.remarks,
-    now,
-    id
+      name = $1, category = $2, vendor = $3, bill_date = $4, warranty_expiry = $5,
+      location = $6, code1 = $7, code2 = $8, label_code = $9, remarks = $10, updated_at = $11
+    WHERE id = $12`,
+    [
+      fields.name,
+      fields.category,
+      fields.vendor,
+      fields.billDate,
+      fields.warrantyExpiry,
+      fields.location,
+      fields.code1,
+      fields.code2,
+      labelCode,
+      fields.remarks,
+      now,
+      id
+    ]
   );
 
-  return getAsset(id);
+  return await getAsset(id);
 }
 
-export function deleteAsset(id) {
-  const result = db.prepare("DELETE FROM assets WHERE id = ?").run(id);
-  return result.changes > 0;
+export async function deleteAsset(id) {
+  if (!process.env.DATABASE_URL) throw new Error("Database not connected");
+  const result = await pool.query("DELETE FROM assets WHERE id = $1", [id]);
+  return result.rowCount > 0;
 }

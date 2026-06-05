@@ -28,7 +28,7 @@ function getLanIPv4() {
   );
 }
 
-initDb();
+initDb().catch(console.error);
 
 const app = express();
 app.use(cors());
@@ -61,17 +61,28 @@ app.get("/api/scan-base", (_req, res) => {
   res.json({ scanBase: `http://${lan}:${SCAN_PORT}` });
 });
 
-app.get("/api/assets", requirePin, (_req, res) => {
-  res.json(listAssets());
+app.get("/api/assets", requirePin, async (_req, res) => {
+  try {
+    const assets = await listAssets();
+    res.json(assets);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
-app.get("/api/assets/:id", (req, res) => {
-  const asset = getAsset(req.params.id);
-  if (!asset) return res.status(404).json({ error: "Asset not found" });
-  res.json(asset);
+app.get("/api/assets/:id", async (req, res) => {
+  try {
+    const asset = await getAsset(req.params.id);
+    if (!asset) return res.status(404).json({ error: "Asset not found" });
+    res.json(asset);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
-app.post("/api/assets", requirePin, (req, res) => {
+app.post("/api/assets", requirePin, async (req, res) => {
   const { name, category, vendor, billDate, warrantyExpiry, location, code1, code2, remarks } =
     req.body || {};
 
@@ -80,53 +91,67 @@ app.post("/api/assets", requirePin, (req, res) => {
     return res.status(400).json({ error: "Both college code numbers are required" });
   }
 
-  const asset = createAsset({
-    name: name.trim(),
-    category: category || "Other",
-    vendor: vendor?.trim() || "",
-    billDate: billDate || "",
-    warrantyExpiry: warrantyExpiry || "",
-    location: location?.trim() || "",
-    code1: code1.trim(),
-    code2: code2.trim(),
-    remarks: remarks?.trim() || "",
-    publicBaseUrl: PUBLIC_BASE_URL,
-  });
-
-  res.status(201).json(asset);
-});
-
-app.put("/api/assets/:id", requirePin, (req, res) => {
-  const existing = getAsset(req.params.id);
-  if (!existing) return res.status(404).json({ error: "Asset not found" });
-
-  const { name, category, vendor, billDate, warrantyExpiry, location, code1, code2, remarks } =
-    req.body || {};
-
-  if (!name?.trim()) return res.status(400).json({ error: "Item name is required" });
-  if (!code1?.trim() || !code2?.trim()) {
-    return res.status(400).json({ error: "Both college code numbers are required" });
+  try {
+    const asset = await createAsset({
+      name: name.trim(),
+      category: category || "Other",
+      vendor: vendor?.trim() || "",
+      billDate: billDate || "",
+      warrantyExpiry: warrantyExpiry || "",
+      location: location?.trim() || "",
+      code1: code1.trim(),
+      code2: code2.trim(),
+      remarks: remarks?.trim() || "",
+      publicBaseUrl: PUBLIC_BASE_URL,
+    });
+    res.status(201).json(asset);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
   }
-
-  const asset = updateAsset(req.params.id, {
-    name: name.trim(),
-    category: category || "Other",
-    vendor: vendor?.trim() || "",
-    billDate: billDate || "",
-    warrantyExpiry: warrantyExpiry || "",
-    location: location?.trim() || "",
-    code1: code1.trim(),
-    code2: code2.trim(),
-    remarks: remarks?.trim() || "",
-  });
-
-  res.json(asset);
 });
 
-app.delete("/api/assets/:id", requirePin, (req, res) => {
-  const ok = deleteAsset(req.params.id);
-  if (!ok) return res.status(404).json({ error: "Asset not found" });
-  res.json({ ok: true });
+app.put("/api/assets/:id", requirePin, async (req, res) => {
+  try {
+    const existing = await getAsset(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Asset not found" });
+
+    const { name, category, vendor, billDate, warrantyExpiry, location, code1, code2, remarks } =
+      req.body || {};
+
+    if (!name?.trim()) return res.status(400).json({ error: "Item name is required" });
+    if (!code1?.trim() || !code2?.trim()) {
+      return res.status(400).json({ error: "Both college code numbers are required" });
+    }
+
+    const asset = await updateAsset(req.params.id, {
+      name: name.trim(),
+      category: category || "Other",
+      vendor: vendor?.trim() || "",
+      billDate: billDate || "",
+      warrantyExpiry: warrantyExpiry || "",
+      location: location?.trim() || "",
+      code1: code1.trim(),
+      code2: code2.trim(),
+      remarks: remarks?.trim() || "",
+    });
+
+    res.json(asset);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.delete("/api/assets/:id", requirePin, async (req, res) => {
+  try {
+    const ok = await deleteAsset(req.params.id);
+    if (!ok) return res.status(404).json({ error: "Asset not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
 });
 
 const clientDist = path.join(__dirname, "..", "client", "dist");
@@ -142,5 +167,8 @@ app.listen(PORT, () => {
   console.log(`Asset server running on http://localhost:${PORT}`);
   if (!PUBLIC_BASE_URL) {
     console.log("Tip: set PUBLIC_BASE_URL for production barcode URLs (e.g. https://assets.nitk.edu.in)");
+  }
+  if (!process.env.DATABASE_URL) {
+    console.log("WARNING: DATABASE_URL is not set. Data features will not work until connected to Postgres.");
   }
 });
