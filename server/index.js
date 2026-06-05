@@ -5,7 +5,12 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { initDb, listAssets, getAsset, createAsset, updateAsset, deleteAsset } from "./db.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+let __dirname;
+try {
+  __dirname = path.dirname(fileURLToPath(import.meta.url));
+} catch (e) {
+  __dirname = process.cwd();
+}
 const PORT = process.env.PORT || 3001;
 /** Port phones use to open the web app (5173 = Vite dev, 3001 = production) */
 const SCAN_PORT = process.env.SCAN_PORT || process.env.CLIENT_PORT || 5173;
